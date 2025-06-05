@@ -1,6 +1,9 @@
 package org.example.documentGenerator.ui;
 
 import org.example.backend.DocumentationGenerator;
+import org.example.backend.ExportOptions;
+import org.example.backend.Exporter;
+import org.example.backend.Settings;
 import org.example.services.GitHubService;
 
 import javax.swing.*;
@@ -8,13 +11,11 @@ import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 
 public class DocumentationGeneratorUI extends JFrame {
-    private JTextField repoUrlField;
+    private JTextArea repoUrlField;
     private JTextField outputPathField;
     private JButton browseButton;
     private JButton getGitHubContentButton;
@@ -24,6 +25,18 @@ public class DocumentationGeneratorUI extends JFrame {
     private JProgressBar progressBar;
     private GitHubService gitHubService;
     private DocumentationGenerator documentationGenerator;
+    private JTextArea customPromptArea;
+    private JComboBox<String> exportFormatComboBox;
+    private Settings appSettings;
+
+    private static final Map<String, Exporter> exporters = Map.of(
+            "Markdown (.md)", new ExportOptions.MdExporter(),
+            "Text (.txt)", new ExportOptions.TxtExporter(),
+            "PDF (.pdf)", new ExportOptions.PdfExporter(),
+            "Word (.docx)", new ExportOptions.DocExporter(),
+            "HTML (.html)", new ExportOptions.HtmlExporter(),
+            "JSON (.json)", new ExportOptions.JsonExporter()
+    );
 
     public DocumentationGeneratorUI() {
         setTitle("Documentation Generator");
@@ -40,10 +53,37 @@ public class DocumentationGeneratorUI extends JFrame {
         add(createOutputPanel(), BorderLayout.SOUTH);
 
         gitHubService = new GitHubService();
-        documentationGenerator = new DocumentationGenerator("", "");
+        appSettings = new Settings("", 0.7, 1000,"llama3-70b-8192");
+        documentationGenerator = new DocumentationGenerator("", "","", appSettings);
 
-        loadConfig();
+        createMenuBar();
+
     }
+
+    private void openSettingsDialog() {
+        SettingsDialog dialog = new SettingsDialog(this, appSettings);
+        dialog.setVisible(true);
+
+        if (dialog.isSaved()) {
+            appSettings = dialog.getSettings();
+
+            boolean apiKeySet = appSettings.getApiKey() != null && !appSettings.getApiKey().isBlank();
+            generateLLMDocButton.setEnabled(apiKeySet);
+        }
+    }
+
+    private void createMenuBar() {
+        JMenuBar menuBar = new JMenuBar();
+        JMenu menu = new JMenu("AI Services");
+
+        JMenuItem settingsItem = new JMenuItem("Settings");
+        settingsItem.addActionListener(e -> openSettingsDialog());
+
+        menu.add(settingsItem);
+        menuBar.add(menu);
+        setJMenuBar(menuBar);
+    }
+
 
     private JPanel createInputPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
@@ -63,7 +103,10 @@ public class DocumentationGeneratorUI extends JFrame {
         gbc.gridy = 0;
         gbc.gridwidth = 2;
         gbc.weightx = 1.0;
-        repoUrlField = new JTextField(40);
+        gbc.weighty = 0.3;
+        repoUrlField = new JTextArea(1, 40);
+        repoUrlField.setLineWrap(true);
+        repoUrlField.setWrapStyleWord(true);
         panel.add(repoUrlField, gbc);
 
         // Button panel for parallel buttons
@@ -80,12 +123,41 @@ public class DocumentationGeneratorUI extends JFrame {
         generateLLMDocButton.setEnabled(false);
         buttonPanel.add(generateLLMDocButton);
 
+        // use cases button
+        JButton seeUseCasesButton = new JButton("See More Use Cases");
+        seeUseCasesButton.addActionListener(e -> {
+            UseCasesDialog dialog = new UseCasesDialog(this, customPromptArea);
+            dialog.setVisible(true);
+        });
+        buttonPanel.add(seeUseCasesButton);
+
         // Add button panel to main panel
+        gbc.gridx = 2;
+        gbc.gridy = 2;
+        gbc.gridwidth = 2;
+        gbc.weightx = 1.0;
+        panel.add(buttonPanel, gbc);
+
+        // Custom prompt label
+        gbc.gridx = 0;
+        gbc.gridy = 1;
+        gbc.gridwidth = 1;
+        gbc.weightx = 0.0;
+        panel.add(new JLabel("Custom Prompt:"), gbc);
+
+        // Custom prompt text area inside scroll pane
         gbc.gridx = 1;
         gbc.gridy = 1;
         gbc.gridwidth = 2;
         gbc.weightx = 1.0;
-        panel.add(buttonPanel, gbc);
+        gbc.fill = GridBagConstraints.BOTH;  // Allow vertical resizing
+        gbc.weighty = 0.3;  // Give some vertical weight so it grows nicely
+
+        customPromptArea = new JTextArea(5, 40);
+        customPromptArea.setLineWrap(true);
+        customPromptArea.setWrapStyleWord(true);
+        JScrollPane promptScrollPane = new JScrollPane(customPromptArea);
+        panel.add(promptScrollPane, gbc);
 
         return panel;
     }
@@ -107,27 +179,47 @@ public class DocumentationGeneratorUI extends JFrame {
     private JPanel createOutputPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
-        gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
 
+        // Output path label
         gbc.gridx = 0;
         gbc.gridy = 0;
+        gbc.weightx = 0.0;
         panel.add(new JLabel("Output Path:"), gbc);
 
+        // Output path text field
         gbc.gridx = 1;
         gbc.gridy = 0;
+        gbc.weightx = 1.0;
         outputPathField = new JTextField(30);
         panel.add(outputPathField, gbc);
 
+        // Browse button
         gbc.gridx = 2;
         gbc.gridy = 0;
+        gbc.weightx = 0.0;
         browseButton = new JButton("Browse");
         browseButton.addActionListener(this::browseButtonClicked);
         panel.add(browseButton, gbc);
 
+        // Export format label
+        gbc.gridx = 0;
+        gbc.gridy = 1;
+        panel.add(new JLabel("Export Format:"), gbc);
+
+        // Export format combo box
         gbc.gridx = 1;
         gbc.gridy = 1;
-        saveButton = new JButton("Save Documentation");
+        gbc.gridwidth = 2;
+        exportFormatComboBox = new JComboBox<>(new String[] {"Markdown (.md)", "Text (.txt)", "PDF (.pdf)", "Word (.docx)", "HTML (.html)", "JSON (.json)"});
+        panel.add(exportFormatComboBox, gbc);
+
+        // Save button
+        gbc.gridx = 1;
+        gbc.gridy = 2;
+        gbc.gridwidth = 2;
+        saveButton = new JButton("Export");
         saveButton.addActionListener(this::saveButtonClicked);
         saveButton.setEnabled(false);
         panel.add(saveButton, gbc);
@@ -188,7 +280,6 @@ public class DocumentationGeneratorUI extends JFrame {
         }.execute();
     }
 
-
     private void generateLLMDocClicked(ActionEvent e) {
         String repoUrl = repoUrlField.getText();
         String outputPath = outputPathField.getText();
@@ -199,24 +290,26 @@ public class DocumentationGeneratorUI extends JFrame {
             return;
         }
 
-        if (outputPath.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please select an output path.", "Input Error", JOptionPane.ERROR_MESSAGE);
+        if (appSettings.getApiKey() == null || appSettings.getApiKey().isBlank()) {
+            JOptionPane.showMessageDialog(this, "API key is missing. Please configure it in Settings.", "Missing API Key", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
         disableInputs();
         resetProgress();
 
-        new SwingWorker<Void, String>() {
+        new SwingWorker<String, String>() {
             @Override
-            protected Void doInBackground() throws Exception {
-                documentationGenerator = new DocumentationGenerator(repoUrl, outputPath);
-                documentationGenerator.generate(this::publish);
-                return null;
+            protected String doInBackground() throws Exception {
+                String customPrompt = customPromptArea.getText().trim();
+                // Pass customPrompt only if not empty; else pass null or empty string as per your constructor's expectation
+                String promptToUse = customPrompt.isEmpty() ? null : customPrompt;
+                documentationGenerator = new DocumentationGenerator(repoUrl, outputPath, promptToUse, appSettings);
+                return documentationGenerator.generate(this::publish);
             }
 
             @Override
-            protected void process(java.util.List<String> chunks) {
+            protected void process(List<String> chunks) {
                 for (String message : chunks) {
                     responseArea.append(message + "\n");
                     responseArea.setCaretPosition(responseArea.getDocument().getLength());
@@ -226,7 +319,8 @@ public class DocumentationGeneratorUI extends JFrame {
             @Override
             protected void done() {
                 try {
-                    get();
+                    String finalDocumentation = get();
+                    responseArea.setText(finalDocumentation);
                     saveButton.setEnabled(true);
                     JOptionPane.showMessageDialog(DocumentationGeneratorUI.this, "LLM documentation generated successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
                 } catch (Exception ex) {
@@ -257,18 +351,41 @@ public class DocumentationGeneratorUI extends JFrame {
     }
 
     private void saveButtonClicked(ActionEvent e) {
-        String outputPath = outputPathField.getText();
+        String outputPath = outputPathField.getText().trim();
         if (outputPath.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please select an output path.", "Input Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Please enter an output path or file name.", "Input Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
 
-        File outputFile = new File(outputPath, "DOCUMENTATION.md");
-        try (PrintWriter out = new PrintWriter(outputFile)) {
-            out.println(responseArea.getText());
-            JOptionPane.showMessageDialog(this, "Documentation saved to " + outputFile.getAbsolutePath(), "Save Successful", JOptionPane.INFORMATION_MESSAGE);
-        } catch (FileNotFoundException ex) {
-            JOptionPane.showMessageDialog(this, "Error saving documentation: " + ex.getMessage(), "Save Error", JOptionPane.ERROR_MESSAGE);
+        String docContent = responseArea.getText();
+        if (docContent.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "No documentation content to export.", "Input Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        String selectedFormat = (String) exportFormatComboBox.getSelectedItem();
+        Exporter exporter = exporters.get(selectedFormat);
+
+        if (exporter == null) {
+            JOptionPane.showMessageDialog(this, "Unsupported export format: " + selectedFormat, "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        File output = new File(outputPath);
+
+        if (output.isDirectory()) {
+            output = new File(output, "documentation." + selectedFormat);
+        } else {
+            if (!output.getName().endsWith("." + selectedFormat)) {
+                output = new File(output.getAbsolutePath());
+            }
+        }
+
+        try {
+            exporter.export(output.getAbsolutePath(), docContent);
+            JOptionPane.showMessageDialog(this, "Exported successfully", "Success", JOptionPane.INFORMATION_MESSAGE);
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "Error exporting documentation: " + ex.getMessage(), "Export Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -276,21 +393,5 @@ public class DocumentationGeneratorUI extends JFrame {
         progressBar.setValue(0);
         responseArea.setText("");
         saveButton.setEnabled(false);
-    }
-
-    private void loadConfig() {
-        try (InputStream input = getClass().getClassLoader().getResourceAsStream("config.properties")) {
-            if (input == null) {
-                System.out.println("Sorry, unable to find config.properties");
-                return;
-            }
-            Properties props = new Properties();
-            props.load(input);
-            repoUrlField.setText(props.getProperty("default.repo.url", ""));
-            outputPathField.setText(props.getProperty("default.output.path", ""));
-        } catch (IOException e) {
-            e.printStackTrace();
-            JOptionPane.showMessageDialog(this, "Failed to load configuration: " + e.getMessage(), "Configuration Error", JOptionPane.ERROR_MESSAGE);
-        }
     }
 }
