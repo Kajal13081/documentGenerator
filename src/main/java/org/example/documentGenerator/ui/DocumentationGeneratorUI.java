@@ -4,6 +4,7 @@ import org.example.backend.DocumentationGenerator;
 import org.example.backend.ExportOptions;
 import org.example.backend.Exporter;
 import org.example.backend.Settings;
+import org.example.services.GitHubMarkdownService;
 import org.example.services.GitHubService;
 
 import javax.swing.*;
@@ -28,6 +29,7 @@ public class DocumentationGeneratorUI extends JFrame {
     private JTextArea customPromptArea;
     private JComboBox<String> exportFormatComboBox;
     private Settings appSettings;
+    private JButton exportToGitHubButton;
 
     private static final Map<String, Exporter> exporters = Map.of(
             "Markdown (.md)", new ExportOptions.MdExporter(),
@@ -219,12 +221,74 @@ public class DocumentationGeneratorUI extends JFrame {
         gbc.gridx = 1;
         gbc.gridy = 2;
         gbc.gridwidth = 2;
+        gbc.weightx = 1.0; // allow horizontal stretch
         saveButton = new JButton("Export");
         saveButton.addActionListener(this::saveButtonClicked);
-        saveButton.setEnabled(false);
         panel.add(saveButton, gbc);
 
+        // Export to GitHub button
+        gbc.gridx = 1;
+        gbc.gridy = 3;
+        gbc.gridwidth = 2;
+        gbc.weightx = 1.0;
+        exportToGitHubButton = new JButton("Export to GitHub Repo");
+        exportToGitHubButton.addActionListener(e -> exportToGitHub());
+        panel.add(exportToGitHubButton, gbc);
+
+
         return panel;
+    }
+
+    private void exportToGitHub() {
+        if (responseArea.getText().isBlank()) {
+            JOptionPane.showMessageDialog(this, "No documentation content to export.", "Input Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        GitHubExportDialog dialog = new GitHubExportDialog(this);
+        dialog.setVisible(true);
+
+        if (!dialog.isSaved()) {
+            return;
+        }
+
+        String repoUrl = dialog.getRepoUrl();
+        String branch = dialog.getBranch();
+        String token = dialog.getToken();
+        String commitMsg = dialog.getCommitMessage();
+        String readmeFileName = dialog.getReadmeFileName();
+
+        String markdownContent = responseArea.getText();
+        File localRepoDir = new File(System.getProperty("user.home"), ".docgen_repo_cache");
+
+        int confirm = JOptionPane.showConfirmDialog(this,
+                "Are you sure you want to push changes to the remote repository?",
+                "Confirm Push",
+                JOptionPane.YES_NO_OPTION);
+
+        if (confirm != JOptionPane.YES_OPTION) {
+            return;
+        }
+
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                GitHubMarkdownService.exportMarkdownToRepo(
+                        repoUrl, branch, token, readmeFileName, markdownContent, commitMsg, localRepoDir);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                exportToGitHubButton.setEnabled(true);
+                try {
+                    get();
+                    JOptionPane.showMessageDialog(DocumentationGeneratorUI.this, "Documentation exported successfully to GitHub repo!", "Success", JOptionPane.INFORMATION_MESSAGE);
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(DocumentationGeneratorUI.this, "Error exporting to GitHub repo: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
     private void browseButtonClicked(ActionEvent e) {
@@ -338,8 +402,6 @@ public class DocumentationGeneratorUI extends JFrame {
         getGitHubContentButton.setEnabled(false);
         generateLLMDocButton.setEnabled(false);
         outputPathField.setEnabled(false);
-        browseButton.setEnabled(false);
-        saveButton.setEnabled(false);
     }
 
     private void enableInputs() {
@@ -392,6 +454,5 @@ public class DocumentationGeneratorUI extends JFrame {
     private void resetProgress() {
         progressBar.setValue(0);
         responseArea.setText("");
-        saveButton.setEnabled(false);
     }
 }

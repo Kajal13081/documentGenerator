@@ -45,7 +45,7 @@ public class DocumentationGenerator {
             finalDoc.append("## File: ").append(fileName).append("\n\n");
             finalDoc.append(doc).append("\n\n---\n\n");
 
-            Thread.sleep(5000);
+            Thread.sleep(15000);
 
             fileCount++;
         }
